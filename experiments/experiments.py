@@ -11,6 +11,8 @@ parser.add_argument("--N", type = int, help = "number of total samples to use", 
 parser.add_argument("--rho", type = float, help = "proportion of N to resample from full model", default = 0.05)
 parser.add_argument("--saved", type = bool, help = "use previous simulations instead", default = False)
 parser.add_argument("--saved_test", type = bool, help = "use previous simulations in test", default = True)
+parser.add_argument("--save_summary_statistic", type = bool, help = "save summary statistic after training", default = True)
+parser.add_argument("--load_summary_statistic", type = bool, help = "use previous summary statistic", default = False)
 parser.add_argument("--test", type = bool, help = "evaluate on hold out test set", default = False)
 parser.add_argument("--N_test", type = int, help = "number of test samples to use for evaluation", default = 100000)
 parser.add_argument("--ss_patience", type = int, help = "patience for training the summary statistic", default = 10)
@@ -18,6 +20,7 @@ parser.add_argument("--ratio_patience", type = int, help = "patience for trainin
 parser.add_argument("--save_simulations", type = bool, help = "save simulation trajectories", default = False)
 args = parser.parse_args()
 
+import pickle
 import torch
 torch.set_num_threads(5)
 
@@ -49,6 +52,8 @@ M = args.M
 N_test = args.N_test
 saved = args.saved
 save_simulations = args.save_simulations
+save_summary_statistic = args.save_summary_statistic
+load_summary_statistic = args.load_summary_statistic
 saved_test = args.saved_test
 task = args.task
 test = args.test
@@ -62,31 +67,41 @@ if saved:
         saved = False 
 
 if save_simulations and not os.path.isdir(base_dir + "/saved_simulations"):
-        os.mkdir(base_dir + "/saved_simulations")
-        
+    os.mkdir(base_dir + "/saved_simulations")
+
 if task == 'approx_only':
 
-    if saved:
-        if os.path.isfile(base_dir + "/saved_simulations/approx_sims_train.npy"):
-            params = np.load(base_dir + "/saved_simulations/params_train.npy")
-            approx_sims = np.load(base_dir + "/saved_simulations/approx_sims_train.npy")
-            if N < params.shape[0]:
-                tidces = np.random.choice(params.shape[0], N, replace = False)
-                params = params[tidces]
-                approx_sims = approx_sims[tidces]
+    if not load_summary_statistic or (load_summary_statistic and not os.path.isfile(base_dir + "/saved_simulations/approx_only_summary_statistics.pkl")):
+        if saved:
+            if os.path.isfile(base_dir + "/saved_simulations/approx_sims_train.npy"):
+                params = np.load(base_dir + "/saved_simulations/params_train.npy")
+                approx_sims = np.load(base_dir + "/saved_simulations/approx_sims_train.npy")
+                if N < params.shape[0]:
+                    tidces = np.random.choice(params.shape[0], N, replace = False)
+                    params = params[tidces]
+                    approx_sims = approx_sims[tidces]
+            else:
+                print("No saved simulations exist.")
+                sys.exit(1)
         else:
-            print("No saved simulations exist.")
-            sys.exit(1)
-    else:
-        params, approx_sims = model.generate_samples([approx_simulator], N, result_filter)
-        approx_sims = approx_sims[0][:,0,:,:]
-        if save_simulations:
-            np.save(base_dir + "/saved_simulations/params_train.npy", params)
-            np.save(base_dir + "/saved_simulations/approx_sims_train.npy", approx_sims)
+            params, approx_sims = model.generate_samples([approx_simulator], N, result_filter)
+            approx_sims = approx_sims[0][:,0,:,:]
+            if save_simulations:
+                np.save(base_dir + "/saved_simulations/params_train.npy", params)
+                np.save(base_dir + "/saved_simulations/approx_sims_train.npy", approx_sims)
 
-  
-    normalized_params = normalize_data(params, lower_bounds, upper_bounds)
-    summary_statistic = train_summary_statistic(summary_stat_encoder, approx_sims, normalized_params, lr = 1e-3, batch_size = 512, seed = None, patience = ss_patience, scheduler_rate = 0.999)
+
+        normalized_params = normalize_data(params, lower_bounds, upper_bounds)
+        summary_statistic = train_summary_statistic(summary_stat_encoder, approx_sims, normalized_params, lr = 1e-3, batch_size = 512, seed = None, patience = ss_patience, scheduler_rate = 0.999)
+
+        if save_summary_statistic:
+            f = open(base_dir + "/saved_simulations/approx_only_summary_statistics.pkl", "wb")
+            pickle.dump(summary_statistic, f)
+    else:
+        print("Loading summary statistic...")
+        f = open(base_dir + "/saved_simulations/approx_only_summary_statistics.pkl", "rb")
+        summary_statistic = pickle.load(f)
+        print("Done")
 
     if test:
         if saved_test:
@@ -114,27 +129,37 @@ if task == 'approx_only':
 
 elif task == 'full_only':
 
-    if saved:
-        if os.path.isfile(base_dir + "/saved_simulations/full_sims_train.npy"):
-            params = np.load(base_dir + "/saved_simulations/params_train.npy")
-            full_sims = np.load(base_dir + "/saved_simulations/full_sims_train.npy")
-            if N < params.shape[0]:
-                tidces = np.random.choice(params.shape[0], N, replace = False)
-                params = params[tidces]
-                full_sims = full_sims[tidces]
-        else:
-            print("No saved simulations exist.")
-            sys.exit(1)
+    if not load_summary_statistic or (load_summary_statistic and not os.path.isfile(base_dir + "/saved_simulations/full_only_summary_statistics.pkl")):
+        if saved:
+            if os.path.isfile(base_dir + "/saved_simulations/full_sims_train.npy"):
+                params = np.load(base_dir + "/saved_simulations/params_train.npy")
+                full_sims = np.load(base_dir + "/saved_simulations/full_sims_train.npy")
+                if N < params.shape[0]:
+                    tidces = np.random.choice(params.shape[0], N, replace = False)
+                    params = params[tidces]
+                    full_sims = full_sims[tidces]
+            else:
+                print("No saved simulations exist.")
+                sys.exit(1)
 
+        else:
+            params, full_sims = model.generate_samples([model.simulate_ssa], N, result_filter)
+            full_sims = full_sims[0][:,0,:,:]
+            if save_simulations:
+                np.save(base_dir + "/saved_simulations/params_train.npy", params)
+                np.save(base_dir + "/saved_simulations/full_sims_train.npy", full_sims)
+        
+        normalized_params = normalize_data(params, lower_bounds, upper_bounds)
+        summary_statistic = train_summary_statistic(summary_stat_encoder, full_sims, normalized_params, lr = 1e-3, batch_size = 512, seed = None, patience = ss_patience)
+        
+        if save_summary_statistic:
+            f = open(base_dir + "/saved_simulations/full_only_summary_statistics.pkl", "wb")
+            pickle.dump(summary_statistic, f)
     else:
-        params, full_sims = model.generate_samples([model.simulate_ssa], N, result_filter)
-        full_sims = full_sims[0][:,0,:,:]
-        if save_simulations:
-            np.save(base_dir + "/saved_simulations/params_train.npy", params)
-            np.save(base_dir + "/saved_simulations/full_sims_train.npy", full_sims)
-    
-    normalized_params = normalize_data(params, lower_bounds, upper_bounds)
-    summary_statistic = train_summary_statistic(summary_stat_encoder, full_sims, normalized_params, lr = 1e-3, batch_size = 512, seed = None, patience = ss_patience)
+        print("Loading summary statistic...")
+        f = open(base_dir + "/saved_simulations/full_only_summary_statistics.pkl", "rb")
+        summary_statistic = pickle.load(f)
+        print("Done")
 
     if test:
         if saved_test:
@@ -162,50 +187,58 @@ elif task == 'full_only':
 
 elif task == 'mixed':
     
-    ratio_params, ratio_sims = model.generate_samples([model.simulate_ssa, approx_simulator], M, result_filter)
-    ratio_full_sims, ratio_approx_sims = ratio_sims
-    ratio_full_sims = ratio_full_sims[:,0,:,:]
-    ratio_approx_sims = ratio_approx_sims[:,0,:,:]
-    
-    normalized_ratio_params = normalize_data(ratio_params, lower_bounds, upper_bounds)
-    
-    # train ratio estimator 
-    train_ratio_estimator(ratio_estimator, ratio_full_sims, ratio_approx_sims, normalized_ratio_params, lr = 5e-4, batch_size = 64, patience = re_patience)
-    
-    # build approximate dataset
-    print("Constructing initial approximate dataset")
-    params, sims = model.generate_samples([approx_simulator], N - M, result_filter)
-    approx_sims = sims[0][:,0,:,:]
+    if not load_summary_statistic or (load_summary_statistic and not os.path.isfile(base_dir + "/saved_simulations/approx_summary_statistics.pkl")):
+        ratio_params, ratio_sims = model.generate_samples([model.simulate_ssa, approx_simulator], M, result_filter)
+        ratio_full_sims, ratio_approx_sims = ratio_sims
+        ratio_full_sims = ratio_full_sims[:,0,:,:]
+        ratio_approx_sims = ratio_approx_sims[:,0,:,:]
+        
+        normalized_ratio_params = normalize_data(ratio_params, lower_bounds, upper_bounds)
+        
+        # train ratio estimator 
+        train_ratio_estimator(ratio_estimator, ratio_full_sims, ratio_approx_sims, normalized_ratio_params, lr = 5e-4, batch_size = 64, patience = re_patience)
+        
+        # build approximate dataset
+        print("Constructing initial approximate dataset")
+        params, sims = model.generate_samples([approx_simulator], N - M, result_filter)
+        approx_sims = sims[0][:,0,:,:]
 
-    normalized_params = normalize_data(params, lower_bounds, upper_bounds)
-    
-    probs_approx = torch.sigmoid(ratio_estimator.eval()(torch.tensor(np.hstack([approx_sims.reshape(approx_sims.shape[0], -1), normalized_params]).astype(np.float32)))).detach().numpy()[:,0]
-    sorted_probs = list(np.argsort(probs_approx))
+        normalized_params = normalize_data(params, lower_bounds, upper_bounds)
+        
+        probs_approx = torch.sigmoid(ratio_estimator.eval()(torch.tensor(np.hstack([approx_sims.reshape(approx_sims.shape[0], -1), normalized_params]).astype(np.float32)))).detach().numpy()[:,0]
+        sorted_probs = list(np.argsort(probs_approx))
 
-    one_sided = int((rho * params.shape[0])/2)
-    resample_indices = sorted_probs[:one_sided] + sorted_probs[-one_sided:]
-    
-    # resample from full model
-    print("Resampling from full")
-    _, full_params, full_sims = model._draw_samples(model.simulate_ssa, params[resample_indices], result_filter)
-    full_sims = full_sims[:,0,:,:]
+        one_sided = int((rho * params.shape[0])/2)
+        resample_indices = sorted_probs[:one_sided] + sorted_probs[-one_sided:]
+        
+        # resample from full model
+        print("Resampling from full")
+        _, full_params, full_sims = model._draw_samples(model.simulate_ssa, params[resample_indices], result_filter)
+        full_sims = full_sims[:,0,:,:]
 
-    mixed_params = [ratio_params]
-    mixed_sims = [ratio_full_sims]
-    
-    approx_indces = sorted_probs[one_sided:len(sorted_probs) - one_sided]
-    mixed_params.append(params[approx_indces])
-    mixed_sims.append(approx_sims[approx_indces])
-    
-    mixed_params.append(full_params)
-    mixed_sims.append(full_sims)
+        mixed_params = [ratio_params]
+        mixed_sims = [ratio_full_sims]
+        
+        approx_indces = sorted_probs[one_sided:len(sorted_probs) - one_sided]
+        mixed_params.append(params[approx_indces])
+        mixed_sims.append(approx_sims[approx_indces])
+        
+        mixed_params.append(full_params)
+        mixed_sims.append(full_sims)
 
-    mixed_params = np.vstack(mixed_params)
-    mixed_sims = np.vstack(mixed_sims)
-    
-    print("Training summary statistic with {} full_samples".format(full_params.shape[0] + M))
-    normalized_mixed_params = normalize_data(mixed_params, lower_bounds, upper_bounds)
-    summary_statistic = train_summary_statistic(summary_stat_encoder, mixed_sims, normalized_mixed_params, lr = 1e-3, batch_size = 512, seed = None, patience = ss_patience)
+        mixed_params = np.vstack(mixed_params)
+        mixed_sims = np.vstack(mixed_sims)
+        
+        print("Training summary statistic with {} full_samples".format(full_params.shape[0] + M))
+        normalized_mixed_params = normalize_data(mixed_params, lower_bounds, upper_bounds)
+        summary_statistic = train_summary_statistic(summary_stat_encoder, mixed_sims, normalized_mixed_params, lr = 1e-3, batch_size = 512, seed = None, patience = ss_patience)
+        
+        if save_summary_statistic:
+            f = open(base_dir + "/saved_simulations/approx_summary_statistics.pkl", "wb")
+            pickle.dump(summary_statistic, f)
+    else:
+        f = open(base_dir + "/saved_simulations/approx_summary_statistics.pkl", "rb")
+        summary_statistic = pickle.load(f)
 
     if test:
         if saved_test:
