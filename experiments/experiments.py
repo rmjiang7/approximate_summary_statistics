@@ -8,10 +8,11 @@ parser.add_argument("task", help = "task to run", type = str, choices = ['approx
 
 parser.add_argument("--M", type = int, help = "number of ratio estimator samples to gather", default = 5000)
 parser.add_argument("--N", type = int, help = "number of total samples to use", default = 100000)
-parser.add_argument("--rho", type = float, help = "proportion of N to resample from full model", default = 0.05)
+parser.add_argument("--rho", type = float, help = "one-sided rho cutoff", default = 0.05)
+parser.add_argument("--rho_quantile", type = float, help = "proportion of N to resample from full model", default = -1)
 parser.add_argument("--saved", type = bool, help = "use previous simulations instead", default = False)
 parser.add_argument("--saved_test", type = bool, help = "use previous simulations in test", default = True)
-parser.add_argument("--save_summary_statistic", type = bool, help = "save summary statistic after training", default = True)
+parser.add_argument("--save_summary_statistic", type = bool, help = "save summary statistic after training", default = False)
 parser.add_argument("--load_summary_statistic", type = bool, help = "use previous summary statistic", default = False)
 parser.add_argument("--test", type = bool, help = "evaluate on hold out test set", default = False)
 parser.add_argument("--N_test", type = int, help = "number of test samples to use for evaluation", default = 100000)
@@ -30,6 +31,9 @@ dask.config.set(scheduler = 'processes', workers = 5)
 import logging
 logger = logging.getLogger()
 logger.setLevel(logging.ERROR)
+
+import warnings
+warnings.filterwarnings("ignore")
 
 from approximate_summary_stats.run_experiments import *
 
@@ -58,6 +62,7 @@ saved_test = args.saved_test
 task = args.task
 test = args.test
 rho = args.rho
+rho_quantile = args.rho_quantile
 ss_patience = args.ss_patience
 re_patience = args.ratio_patience
 
@@ -92,7 +97,10 @@ if task == 'approx_only':
 
 
         normalized_params = normalize_data(params, lower_bounds, upper_bounds)
-        summary_statistic = train_summary_statistic(summary_stat_encoder, approx_sims, normalized_params, lr = 1e-3, batch_size = 512, seed = None, patience = ss_patience, scheduler_rate = 0.999)
+        if args.model_name == 'vilar':
+            approx_sims[approx_sims < 1] = 0
+            approx_sims = np.exp(np.log(approx_sims + 0.0001) + np.random.normal(0, 0.4, size = approx_sims.shape))
+        summary_statistic = train_summary_statistic(summary_stat_encoder, approx_sims, normalized_params, lr = 1e-3, batch_size = 512, seed = None, patience = ss_patience)
 
         if save_summary_statistic:
             f = open(base_dir + "/saved_simulations/approx_only_summary_statistics.pkl", "wb")
@@ -123,9 +131,15 @@ if task == 'approx_only':
                 np.save(base_dir + "/saved_simulations/params_test.npy", test_params)
                 np.save(base_dir + "/saved_simulations/full_sims_test.npy", test_full_sims)
         
+        if args.model_name == 'vilar':
+            test_full_sims = np.exp(np.log(test_full_sims + 0.0001) + np.random.normal(0, 0.4, size = test_full_sims.shape))
+
         test_full_sims = torch.tensor(test_full_sims.astype(np.float32))
         mae, e = evaluate_error_metrics(summary_statistic, test_full_sims, test_params, lower_bounds, upper_bounds)
         print("MAE : {}, E : {}".format(mae, e))
+        with open('test_error_approx_{}.csv'.format(args.model_name), 'a+') as f:
+            f.write('{}, {}\n'.format(mae, e))
+
 
 elif task == 'full_only':
 
@@ -149,6 +163,9 @@ elif task == 'full_only':
                 np.save(base_dir + "/saved_simulations/params_train.npy", params)
                 np.save(base_dir + "/saved_simulations/full_sims_train.npy", full_sims)
         
+        if args.model_name == 'vilar':
+            full_sims = np.exp(np.log(full_sims + 0.0001) + np.random.normal(0, 0.4, size = full_sims.shape))
+
         normalized_params = normalize_data(params, lower_bounds, upper_bounds)
         summary_statistic = train_summary_statistic(summary_stat_encoder, full_sims, normalized_params, lr = 1e-3, batch_size = 512, seed = None, patience = ss_patience)
         
@@ -181,9 +198,14 @@ elif task == 'full_only':
                 np.save(base_dir + "/saved_simulations/params_test.npy", test_params)
                 np.save(base_dir + "/saved_simulations/full_sims_test.npy", test_full_sims)
         
+        if args.model_name == 'vilar':
+            test_full_sims = np.exp(np.log(test_full_sims + 0.0001) + np.random.normal(0, 0.4, size = test_full_sims.shape))
+
         test_full_sims = torch.tensor(test_full_sims.astype(np.float32))
         mae, e = evaluate_error_metrics(summary_statistic, test_full_sims, test_params, lower_bounds, upper_bounds)
         print("MAE : {}, E : {}".format(mae, e))
+        with open('test_error_full_{}.csv'.format(args.model_name), 'a+') as f:
+            f.write('{}, {}\n'.format(mae, e))
 
 elif task == 'mixed':
     
@@ -192,6 +214,11 @@ elif task == 'mixed':
         ratio_full_sims, ratio_approx_sims = ratio_sims
         ratio_full_sims = ratio_full_sims[:,0,:,:]
         ratio_approx_sims = ratio_approx_sims[:,0,:,:]
+        
+        if args.model_name == 'vilar':
+            ratio_full_sims = np.exp(np.log(ratio_full_sims + 0.0001) + np.random.normal(0, 0.4, size = ratio_full_sims.shape))
+            ratio_approx_sims[ratio_approx_sims < 1] = 0
+            ratio_approx_sims = np.exp(np.log(ratio_approx_sims + 0.0001) + np.random.normal(0, 0.4, size = ratio_approx_sims.shape))
         
         normalized_ratio_params = normalize_data(ratio_params, lower_bounds, upper_bounds)
         
@@ -203,23 +230,34 @@ elif task == 'mixed':
         params, sims = model.generate_samples([approx_simulator], N - M, result_filter)
         approx_sims = sims[0][:,0,:,:]
 
+        if args.model_name == 'vilar':
+            approx_sims[approx_sims < 1] = 0
+            approx_sims = np.exp(np.log(approx_sims + 0.0001) + np.random.normal(0, 0.4, size = approx_sims.shape))
+
         normalized_params = normalize_data(params, lower_bounds, upper_bounds)
         
         probs_approx = torch.sigmoid(ratio_estimator.eval()(torch.tensor(np.hstack([approx_sims.reshape(approx_sims.shape[0], -1), normalized_params]).astype(np.float32)))).detach().numpy()[:,0]
         sorted_probs = list(np.argsort(probs_approx))
-
-        one_sided = int((rho * params.shape[0])/2)
-        resample_indices = sorted_probs[:one_sided] + sorted_probs[-one_sided:]
+        
+        if rho_quantile > 0:
+            one_sided = int((rho_quantile * params.shape[0])/2)
+            resample_indices = sorted_probs[:one_sided] + sorted_probs[-one_sided:]
+            approx_indces = sorted_probs[one_sided:len(sorted_probs) - one_sided]
+        else:
+            resample_indices = [i for i in sorted_probs if probs_approx[i] < rho or probs_approx[i] > (1 - rho)]
+            approx_indces = [i for i in sorted_probs if probs_approx[i] >= rho and probs_approx[i] <= (1 - rho)]
         
         # resample from full model
         print("Resampling from full")
         _, full_params, full_sims = model._draw_samples(model.simulate_ssa, params[resample_indices], result_filter)
         full_sims = full_sims[:,0,:,:]
+        
+        if args.model_name == 'vilar':
+            full_sims = np.exp(np.log(full_sims + 0.0001) + np.random.normal(0, 0.4, size = full_sims.shape))
 
         mixed_params = [ratio_params]
         mixed_sims = [ratio_full_sims]
         
-        approx_indces = sorted_probs[one_sided:len(sorted_probs) - one_sided]
         mixed_params.append(params[approx_indces])
         mixed_sims.append(approx_sims[approx_indces])
         
@@ -258,13 +296,19 @@ elif task == 'mixed':
             if save_simulations:
                 np.save(base_dir + "/saved_simulations/params_test.npy", test_params)
                 np.save(base_dir + "/saved_simulations/full_sims_test.npy", test_full_sims)
+        
+        if args.model_name == 'vilar':
+            test_full_sims = np.exp(np.log(test_full_sims + 0.0001) + np.random.normal(0, 0.4, size = test_full_sims.shape))
+
         test_full_sims = torch.tensor(test_full_sims.astype(np.float32))
         mae, e = evaluate_error_metrics(summary_statistic, test_full_sims, test_params, lower_bounds, upper_bounds)
         print("MAE : {}, E : {}".format(mae, e))
+        with open('test_error_mixed_{}.csv'.format(args.model_name), 'a+') as f:
+            f.write('{}, {}\n'.format(mae, e))
 
-elif task == 'mixed_saved_single':
+elif task == 'mixed_saved':
     
-    if os.isfile(base_dir + "/saved_simulations/approx_sims_train.npy") and os.path.isfile(base_dir + "/saved_simulations/full_sims_train.npy"):
+    if os.path.isfile(base_dir + "/saved_simulations/approx_sims_train.npy") and os.path.isfile(base_dir + "/saved_simulations/full_sims_train.npy"):
         params = np.load(base_dir + "/saved_simulations/params_train.npy")
         approx_sims = np.load(base_dir + "/saved_simulations/approx_sims_train.npy")
         full_sims = np.load(base_dir + "/saved_simulations/full_sims_train.npy")
@@ -279,27 +323,35 @@ elif task == 'mixed_saved_single':
 
     normalized_params = normalize_data(params, lower_bounds, upper_bounds)
     
+    if args.model_name == 'vilar':
+        full_sims = np.exp(np.log(full_sims + 0.0001) + np.random.normal(0, 0.4, size = full_sims.shape))
+        approx_sims[approx_sims < 1] = 0
+        approx_sims = np.exp(np.log(approx_sims + 0.0001) + np.random.normal(0, 0.4, size = approx_sims.shape))
+
     # train ratio estimator 
     print("Training ratio estimator with M = {}".format(M))
     re_indices = np.random.choice(params.shape[0], M, replace = False)
-    train_ratio_estimator(ratio_estimator, full_sims[re_indices], approx_sims[re_indices], normalized_params[re_indices], lr = 5e-4, batch_size = 64, patience = re_patience)
+    train_ratio_estimator(ratio_estimator, full_sims[re_indices], approx_sims[re_indices], normalized_params[re_indices], lr = 5e-4, batch_size = 256, patience = re_patience)
     
     # build approximate dataset
     probs_approx = torch.sigmoid(ratio_estimator.eval()(torch.tensor(np.hstack([approx_sims.reshape(approx_sims.shape[0], -1), normalized_params]).astype(np.float32)))).detach().numpy()[:,0]
     sorted_probs = list(np.argsort(probs_approx))
 
-    one_sided = int((rho * params.shape[0])/2)
-    full_indices = sorted_probs[:one_sided] + sorted_probs[-one_sided:]
+    if rho_quantile > 0:
+       one_sided = int((rho_quantile * params.shape[0])/2)
+       resample_indices = sorted_probs[:one_sided] + sorted_probs[-one_sided:]
+    else:
+       resample_indices = [i for i in sorted_probs if probs_approx[i] < rho or probs_approx[i] > (1 - rho)]
 
     mixed_sims = approx_sims.copy()
-    for j in full_indices:
+    for j in resample_indices:
         mixed_sims[j,:,:] = full_sims[j,:,:].copy()
 
     for j in re_indices:
         mixed_sims[j,:,:] = full_sims[j,:,:].copy()
     
     # train summary statistic
-    print("Training summary statistic with {} full samples".format(len(full_indices) + len(re_indices)))
+    print("Training summary statistic with {} full samples".format(len(resample_indices) + len(re_indices)))
     summary_statistic = train_summary_statistic(summary_stat_encoder, mixed_sims, normalized_params, lr = 1e-3, batch_size = 512, seed = None, patience = ss_patience)
 
     if test:
@@ -321,6 +373,11 @@ elif task == 'mixed_saved_single':
                 np.save(base_dir + "/saved_simulations/params_test.npy", test_params)
                 np.save(base_dir + "/saved_simulations/full_sims_test.npy", test_full_sims)
         
+        if args.model_name == 'vilar':
+            test_full_sims = np.exp(np.log(test_full_sims + 0.0001) + np.random.normal(0, 0.4, size = test_full_sims.shape))
+
         test_full_sims = torch.tensor(test_full_sims.astype(np.float32))
         mae, e = evaluate_error_metrics(summary_statistic, test_full_sims, test_params, lower_bounds, upper_bounds)
         print("MAE : {}, E : {}".format(mae, e))
+        with open('test_error_mixed_{}.csv'.format(args.model_name), 'a+') as f:
+            f.write('{}, {}\n'.format(mae, e))
