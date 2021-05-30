@@ -57,7 +57,7 @@ class genetic_toggle_switch(gillespy2.Model):
 
 parameter_names = ['alpha1','alpha2','beta','gamma','mu']
 lower_bounds = [0,0,0,0,0]
-upper_bounds = [6,6,6,6,6]
+upper_bounds = [3,3,3,3,3]
 prior = UniformPrior(np.array(lower_bounds), np.array(upper_bounds))
 
 m = genetic_toggle_switch
