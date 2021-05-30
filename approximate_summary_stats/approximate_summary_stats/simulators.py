@@ -122,21 +122,34 @@ class SKMInferenceModel(object):
     def simulate_hybrid(self, param, transform = True, n_trajectories = 1, seed = None, **kwargs):
         return self._simulate_solver(param, TauHybridSolver, transform, n_trajectories, **kwargs)
 
-    def generate_samples(self, simulators, N, result_filter = lambda x: True):
-
-        params = np.vstack(dask.compute(self._prior.draw(N))[0])
+    def generate_samples(self, simulators, N, result_filter = lambda x: True, batch_size = None):
+        print("Drawing from prior...")
+        if batch_size is not None:
+            nbatches = N // batch_size
+            params = []
+            for nb in range(nbatches):
+                with ProgressBar():   
+                    params += dask.compute(self._prior.draw(batch_size))[0]
+            with ProgressBar():
+                if N - batch_size * nbatches > 0:
+                    params += dask.compute(self._prior.draw(N - batch_size * nbatches))[0]
+            
+            params = np.vstack(params)
+        else:
+            params = np.vstack(dask.compute(self._prior.draw(N))[0])
+                    
         sim_res = []
         for simulator in simulators:
-            indices, params, res = self._draw_samples(simulator, params, result_filter)
+            indices, params, res = self._draw_samples(simulator, params, result_filter, batch_size = batch_size)
             for i in range(len(sim_res)):
                 sim_res[i] = sim_res[i][indices]
             sim_res.append(res)
 
         return params, sim_res
 
-    def _draw_samples(self, simulator, params, result_filter = lambda x: True):
+    def _draw_samples(self, simulator, params, result_filter = lambda x: True, batch_size = None):
         # Draw
-
+        
         @dask.delayed
         def sim_reject(param):
             res = simulator(param)
@@ -144,13 +157,31 @@ class SKMInferenceModel(object):
                 return res
             else:
                 return None
+        
+        if batch_size is not None:
+            computed_results = []
+            nbatches = params.shape[0] // batch_size
+            for nb in range(nbatches):
+                results = []
+                for i in range(batch_size):
+                    results.append(sim_reject(params[nb * batch_size + i,:]))
+                with ProgressBar():    
+                    batch_results, = dask.compute(results)
+                computed_results += batch_results
+            results = []
+            if params.shape[0] - (batch_size * nbatches) > 0:
+                for i in range(params.shape[0] - (batch_size * nbatches)):
+                    results.append(sim_reject(params[nbatches * batch_size + i,:]))
+                with ProgressBar():    
+                    batch_results, = dask.compute(results)
+                computed_results += batch_results
+                
+        else:
+            for i in range(params.shape[0]):
+                results.append(sim_reject(params[i,:]))
 
-        results = []
-        for i in range(params.shape[0]):
-            results.append(sim_reject(params[i,:]))
-
-        with ProgressBar():
-            computed_results, = dask.compute(results)
+            with ProgressBar():
+                computed_results, = dask.compute(results)
 
         # Filter the responses
         computed_results_filtered = [(i,c) for i,c in enumerate(computed_results) if c is not None]

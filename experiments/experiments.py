@@ -15,7 +15,7 @@ parser.add_argument("--saved_test", type = bool, help = "use previous simulation
 parser.add_argument("--save_summary_statistic", type = bool, help = "save summary statistic after training", default = False)
 parser.add_argument("--load_summary_statistic", type = bool, help = "use previous summary statistic", default = False)
 parser.add_argument("--test", type = bool, help = "evaluate on hold out test set", default = False)
-parser.add_argument("--N_test", type = int, help = "number of test samples to use for evaluation", default = 100000)
+parser.add_argument("--N_test", type = int, help = "number of test samples to use for evaluation", default = 300000)
 parser.add_argument("--ss_patience", type = int, help = "patience for training the summary statistic", default = 10)
 parser.add_argument("--ratio_patience", type = int, help = "patience for training the ratio estimator", default = 15)
 parser.add_argument("--save_simulations", type = bool, help = "save simulation trajectories", default = False)
@@ -27,13 +27,6 @@ torch.set_num_threads(5)
 
 import dask
 dask.config.set(scheduler = 'processes', workers = 5)
-
-import logging
-logger = logging.getLogger()
-logger.setLevel(logging.ERROR)
-
-import warnings
-warnings.filterwarnings("ignore")
 
 from approximate_summary_stats.run_experiments import *
 
@@ -50,6 +43,15 @@ elif args.model_name == 'pb':
 elif args.model_name == 'vilar':
     from vilar_oscillator.vilar import *
     base_dir = './vilar_oscillator'
+    
+import scipy.special as sc
+olderr = sc.seterr(all='ignore')
+import logging
+logger = logging.getLogger()
+logger.setLevel(logging.ERROR)
+
+import warnings
+warnings.filterwarnings("ignore")
 
 N = args.N
 M = args.M
@@ -89,7 +91,8 @@ if task == 'approx_only':
                 print("No saved simulations exist.")
                 sys.exit(1)
         else:
-            params, approx_sims = model.generate_samples([approx_simulator], N, result_filter)
+            print("Generating samples...")
+            params, approx_sims = model.generate_samples([approx_simulator], N, result_filter, batch_size = 50000)
             approx_sims = approx_sims[0][:,0,:,:]
             if save_simulations:
                 np.save(base_dir + "/saved_simulations/params_train.npy", params)
@@ -118,14 +121,14 @@ if task == 'approx_only':
                 test_full_sims = np.load(base_dir + "/saved_simulations/full_sims_test.npy")
             else:
                 print("No saved test simulations.  Simulating...")
-                test_params, test_full_sims = model.generate_samples([model.simulate_ssa], N_test, result_filter)
+                test_params, test_full_sims = model.generate_samples([model.simulate_ssa_n], N_test, result_filter, batch_size = 50000)
                 test_full_sims = test_full_sims[0][:,0,:,:]
                 if save_simulations:
                     np.save(base_dir + "/saved_simulations/params_test.npy", test_params)
                     np.save(base_dir + "/saved_simulations/full_sims_test.npy", test_full_sims)
 
         else:
-            test_params, test_full_sims = model.generate_samples([model.simulate_ssa], N_test, result_filter)
+            test_params, test_full_sims = model.generate_samples([model.simulate_ssa_n], N_test, result_filter, batch_size = 50000)
             test_full_sims = test_full_sims[0][:,0,:,:]
             if save_simulations:
                 np.save(base_dir + "/saved_simulations/params_test.npy", test_params)
@@ -157,7 +160,7 @@ elif task == 'full_only':
                 sys.exit(1)
 
         else:
-            params, full_sims = model.generate_samples([model.simulate_ssa], N, result_filter)
+            params, full_sims = model.generate_samples([model.simulate_ssa_n], N, result_filter, batch_size = 50000)
             full_sims = full_sims[0][:,0,:,:]
             if save_simulations:
                 np.save(base_dir + "/saved_simulations/params_train.npy", params)
@@ -185,14 +188,14 @@ elif task == 'full_only':
                 test_full_sims = np.load(base_dir + "/saved_simulations/full_sims_test.npy")
             else:
                 print("No saved test simulations.  Simulating...")
-                test_params, test_full_sims = model.generate_samples([model.simulate_ssa], N_test, result_filter)
+                test_params, test_full_sims = model.generate_samples([model.simulate_ssa_n], N_test, result_filter, batch_size = 50000)
                 test_full_sims = test_full_sims[0][:,0,:,:]
                 if save_simulations:
                     np.save(base_dir + "/saved_simulations/params_test.npy", test_params)
                     np.save(base_dir + "/saved_simulations/full_sims_test.npy", test_full_sims)
 
         else:
-            test_params, test_full_sims = model.generate_samples([model.simulate_ssa], N_test, result_filter)
+            test_params, test_full_sims = model.generate_samples([model.simulate_ssa_n], N_test, result_filter, batch_size = 50000)
             test_full_sims = test_full_sims[0][:,0,:,:]
             if save_simulations:
                 np.save(base_dir + "/saved_simulations/params_test.npy", test_params)
@@ -210,7 +213,7 @@ elif task == 'full_only':
 elif task == 'mixed':
     
     if not load_summary_statistic or (load_summary_statistic and not os.path.isfile(base_dir + "/saved_simulations/approx_summary_statistics.pkl")):
-        ratio_params, ratio_sims = model.generate_samples([model.simulate_ssa, approx_simulator], M, result_filter)
+        ratio_params, ratio_sims = model.generate_samples([model.simulate_ssa_n, approx_simulator], M, result_filter, batch_size = 50000)
         ratio_full_sims, ratio_approx_sims = ratio_sims
         ratio_full_sims = ratio_full_sims[:,0,:,:]
         ratio_approx_sims = ratio_approx_sims[:,0,:,:]
@@ -227,7 +230,7 @@ elif task == 'mixed':
         
         # build approximate dataset
         print("Constructing initial approximate dataset")
-        params, sims = model.generate_samples([approx_simulator], N - M, result_filter)
+        params, sims = model.generate_samples([approx_simulator], N - M, result_filter, batch_size = 50000)
         approx_sims = sims[0][:,0,:,:]
 
         if args.model_name == 'vilar':
@@ -249,7 +252,7 @@ elif task == 'mixed':
         
         # resample from full model
         print("Resampling from full")
-        _, full_params, full_sims = model._draw_samples(model.simulate_ssa, params[resample_indices], result_filter)
+        _, full_params, full_sims = model._draw_samples(model.simulate_ssa_n, params[resample_indices], result_filter, batch_size = 50000)
         full_sims = full_sims[:,0,:,:]
         
         if args.model_name == 'vilar':
@@ -285,14 +288,14 @@ elif task == 'mixed':
                 test_full_sims = np.load(base_dir + "/saved_simulations/full_sims_test.npy")
             else:
                 print("No saved test simulations.  Simulating...")
-                test_params, test_full_sims = model.generate_samples([model.simulate_ssa], N_test, result_filter)
+                test_params, test_full_sims = model.generate_samples([model.simulate_ssa_n], N_test, result_filter, batch_size = 50000)
                 test_full_sims = test_full_sims[0][:,0,:,:]
                 if save_simulations:
                     np.save(base_dir + "/saved_simulations/params_test.npy", test_params)
                     np.save(base_dir + "/saved_simulations/full_sims_test.npy", test_full_sims)
 
         else:
-            test_params, test_full_sims = model.generate_samples([model.simulate_ssa], N_test, result_filter)
+            test_params, test_full_sims = model.generate_samples([model.simulate_ssa_n], N_test, result_filter, batch_size = 50000)
             if save_simulations:
                 np.save(base_dir + "/saved_simulations/params_test.npy", test_params)
                 np.save(base_dir + "/saved_simulations/full_sims_test.npy", test_full_sims)
@@ -303,8 +306,9 @@ elif task == 'mixed':
         test_full_sims = torch.tensor(test_full_sims.astype(np.float32))
         mae, e = evaluate_error_metrics(summary_statistic, test_full_sims, test_params, lower_bounds, upper_bounds)
         print("MAE : {}, E : {}".format(mae, e))
+        N = full_params.shape[0] + M
         with open('test_error_mixed_{}.csv'.format(args.model_name), 'a+') as f:
-            f.write('{}, {}\n'.format(mae, e))
+            f.write('{}, {}, {}\n'.format(N, mae, e))
 
 elif task == 'mixed_saved':
     
@@ -361,14 +365,14 @@ elif task == 'mixed_saved':
                 test_full_sims = np.load(base_dir + "/saved_simulations/full_sims_test.npy")
             else:
                 print("No saved test simulations.  Simulating...")
-                test_params, test_full_sims = model.generate_samples([model.simulate_ssa], N_test, result_filter)
+                test_params, test_full_sims = model.generate_samples([model.simulate_ssa_n], N_test, result_filter, batch_size = 50000)
                 test_full_sims = test_full_sims[0][:,0,:,:]
                 if save_simulations:
                     np.save(base_dir + "/saved_simulations/params_test.npy", test_params)
                     np.save(base_dir + "/saved_simulations/full_sims_test.npy", test_full_sims)
 
         else:
-            test_params, test_full_sims = model.generate_samples([model.simulate_ssa], N_test, result_filter)
+            test_params, test_full_sims = model.generate_samples([model.simulate_ssa_n], N_test, result_filter, batch_size = 50000)
             if save_simulations:
                 np.save(base_dir + "/saved_simulations/params_test.npy", test_params)
                 np.save(base_dir + "/saved_simulations/full_sims_test.npy", test_full_sims)
