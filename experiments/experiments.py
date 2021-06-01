@@ -306,9 +306,8 @@ elif task == 'mixed':
         test_full_sims = torch.tensor(test_full_sims.astype(np.float32))
         mae, e = evaluate_error_metrics(summary_statistic, test_full_sims, test_params, lower_bounds, upper_bounds)
         print("MAE : {}, E : {}".format(mae, e))
-        N = full_params.shape[0] + M
         with open('test_error_mixed_{}.csv'.format(args.model_name), 'a+') as f:
-            f.write('{}, {}, {}\n'.format(N, mae, e))
+            f.write('{}, {}\n'.format(mae, e))
 
 elif task == 'mixed_saved':
     

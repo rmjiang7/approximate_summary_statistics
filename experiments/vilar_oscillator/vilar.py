@@ -163,7 +163,7 @@ model = SKMInferenceModel(
             param_transform = parameter_transform,
             output_transform = output_transform,
             fail_transform = fail_transform,
-            timeout = 20000
+            timeout = 10
 )
 
 true_params = np.array([50.0, 500.0, 0.01, 50.0, 50.0, 5.0, 10.0, 0.5, 1.0, 0.2, 1.0, 1.0, 2.0, 50.0, 100.0])

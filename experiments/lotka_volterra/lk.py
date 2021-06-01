@@ -80,7 +80,7 @@ model = SKMInferenceModel(
         param_transform = parameter_transform,
         output_transform = output_transform,
         fail_transform = fail_transform,
-        timeout = 5 
+        timeout = 10
 )
 
 true_params = np.log([0.01, 0.5, 1.0, 0.01])

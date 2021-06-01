@@ -78,7 +78,7 @@ model = SKMInferenceModel(
             param_transform = parameter_transform,
             output_transform = output_transform,
             fail_transform = fail_transform,
-            timeout = 3
+            timeout = 10
 )
 
 true_params = np.array([1,1,2,2,1])
